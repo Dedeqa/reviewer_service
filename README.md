@@ -5,7 +5,7 @@
 2. `make up` — поднимет Postgres и приложение (порт 8080).
 ## Что внутри
 - API на Go (см. `cmd/server/main.go`)
-- PostgreSQL схема — `db/001_create_schema.sql` (подключается при
+- PostgreSQL схема — `migrations/001_create_schema.sql` (подключается при
   инициализации контейнера через `docker-entrypoint-initdb.d`).
 ## Замечания
 - Для простоты все обработчики находятся в `main.go`.
