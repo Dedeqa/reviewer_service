@@ -8,13 +8,13 @@ CREATE TABLE IF NOT EXISTS teams
 CREATE TABLE IF NOT EXISTS users
 (
     id
-    UUID
+    TEXT
     PRIMARY
     KEY
     DEFAULT
     gen_random_uuid
 (
-),
+)::text,
     name TEXT NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT true
     );
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS team_users
 (
     name
 ) ON DELETE CASCADE,
-    user_id UUID REFERENCES users
+    user_id TEXT REFERENCES users
 (
     id
 )
@@ -38,19 +38,27 @@ CREATE TABLE IF NOT EXISTS team_users
     user_id
 )
     );
+DO
+$$
+BEGIN
+    IF
+NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pr_status') THEN
 CREATE TYPE pr_status AS ENUM ('OPEN', 'MERGED');
+END IF;
+END
+$$;
 CREATE TABLE IF NOT EXISTS prs
 (
     id
-    UUID
+    TEXT
     PRIMARY
     KEY
     DEFAULT
     gen_random_uuid
 (
-),
+)::text,
     title TEXT NOT NULL,
-    author_id UUID REFERENCES users
+    author_id TEXT REFERENCES users
 (
     id
 ) ON DELETE SET NULL,
@@ -60,36 +68,37 @@ CREATE TABLE IF NOT EXISTS prs
 )
   ON DELETE SET NULL,
     status pr_status NOT NULL DEFAULT 'OPEN',
-    created_at TIMESTAMP
-  WITH TIME ZONE DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now
+(
+),
+    merged_at TIMESTAMPTZ
     );
 CREATE TABLE IF NOT EXISTS pr_reviewers
 (
     pr_id
-    UUID
+    TEXT
     REFERENCES
     prs
 (
     id
 ) ON DELETE CASCADE,
-    reviewer_id UUID REFERENCES users
+    reviewer_id TEXT REFERENCES users
 (
     id
 )
   ON DELETE CASCADE,
-    assigned_at TIMESTAMP
-  WITH TIME ZONE DEFAULT now(),
+    assigned_at TIMESTAMPTZ DEFAULT now
+(
+),
     PRIMARY KEY
 (
     pr_id,
     reviewer_id
 )
     );
--- Extensions for convenience (pg >= 13)
 CREATE
 EXTENSION IF NOT EXISTS pgcrypto;
--- Indexes to speed up queries (moderate dataset)
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_prs_status ON prs(status);
 CREATE INDEX IF NOT EXISTS idx_pr_reviewers_reviewer ON
-    pr_reviewers(reviewer_id)
+    pr_reviewers(reviewer_id);

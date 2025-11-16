@@ -8,12 +8,7 @@ import (
 )
 
 func PickRandomActiveFromTeamExcluding(team string, exclude []string) (string, error) {
-	rows, err := db.DB.Query(`
-        SELECT u.id
-        FROM users u
-        JOIN team_users tu ON u.id = tu.user_id
-        WHERE tu.team_name=$1 AND u.is_active=true
-    `, team)
+	rows, err := db.DB.Query(` SELECT u.id FROM users u JOIN team_users tu ON u.id = tu.user_id WHERE tu.team_name=$1 AND u.is_active=true`, team)
 	if err != nil {
 		return "", err
 	}

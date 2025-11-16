@@ -1,132 +1,103 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
-
-	"github.com/gorilla/mux"
-
 	"reviewer-service/internal/db"
 	"reviewer-service/internal/models"
+
+	"github.com/gorilla/mux"
 )
 
 func RegisterUserRoutes(r *mux.Router) {
-	r.HandleFunc("/users", createUser).Methods("POST")
-	r.HandleFunc("/users/{id}", getUser).Methods("GET")
-	r.HandleFunc("/users/{id}", updateUser).Methods("PATCH")
-	r.HandleFunc("/users/{id}/assigned-prs", listAssignedPRs).Methods("GET")
+	r.HandleFunc("/users/setIsActive", setUserIsActive).Methods("POST")
+	r.HandleFunc("/users/getReview", listAssignedPRsHandler).Methods("GET")
 }
 
-func createUser(w http.ResponseWriter, r *http.Request) {
-	var u models.User
-	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
-		writeErr(w, 400, err)
+// setIsActive: body { user_id, is_active }
+func setUserIsActive(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID   string `json:"user_id"`
+		IsActive bool   `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, ErrCodeNotFound, err.Error())
 		return
 	}
-
-	if u.Name == "" {
-		writeErr(w, 400, errors.New("name required"))
+	if body.UserID == "" {
+		writeErr(w, 400, ErrCodeNotFound, "user_id required")
 		return
 	}
-
-	if u.ID == "" {
-		err := db.DB.QueryRow(`
-            INSERT INTO users(name,is_active) 
-            VALUES($1,$2) 
-            RETURNING id
-        `, u.Name, u.IsActive).Scan(&u.ID)
-		if err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-	} else {
-		_, err := db.DB.Exec(`
-            INSERT INTO users(id,name,is_active)
-            VALUES($1,$2,$3)
-        `, u.ID, u.Name, u.IsActive)
-		if err != nil {
-			writeErr(w, 500, err)
-			return
-		}
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(u)
-}
-
-func getUser(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-
-	var u models.User
-	row := db.DB.QueryRow(`SELECT id,name,is_active FROM users WHERE id=$1`, id)
-
-	if err := row.Scan(&u.ID, &u.Name, &u.IsActive); err != nil {
-		writeErr(w, 404, errors.New("user not found"))
-		return
-	}
-
-	json.NewEncoder(w).Encode(u)
-}
-
-func updateUser(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-
-	var patch struct {
-		IsActive *bool `json:"isActive"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-
-	if patch.IsActive == nil {
-		writeErr(w, 400, errors.New("isActive required"))
-		return
-	}
-
-	_, err := db.DB.Exec(
-		`UPDATE users SET is_active=$1 WHERE id=$2`,
-		*patch.IsActive, id,
-	)
+	res, err := db.DB.Exec(`UPDATE users SET is_active=$1 WHERE id=$2`,
+		body.IsActive, body.UserID)
 	if err != nil {
-		writeErr(w, 500, err)
+		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		writeErr(w, 404, ErrCodeNotFound, "user not found")
+		return
+	}
+	// try to find a team name for response (optional)
+	var teamName sql.NullString
+	_ = db.DB.QueryRow(`SELECT team_name FROM team_users WHERE user_id=$1
+LIMIT 1`, body.UserID).Scan(&teamName)
+	user := models.User{
+		ID:       body.UserID,
+		Name:     "", // name not supplied by this endpoint
+		IsActive: body.IsActive,
+	}
+	resp := struct {
+		User models.User `json:"user"`
+		Team string      `json:"team_name,omitempty"`
+	}{User: user}
+	if teamName.Valid {
+		resp.Team = teamName.String
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
-func listAssignedPRs(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["id"]
-
+// listAssignedPRsHandler -> GET /users/getReview?user_id=...
+func listAssignedPRsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		writeErr(w, 400, ErrCodeNotFound, "user_id required")
+		return
+	}
 	rows, err := db.DB.Query(`
-        SELECT p.id, p.title, p.author_id, p.team_name, p.status
-        FROM prs p
-        JOIN pr_reviewers prr ON p.id = prr.pr_id
-        WHERE prr.reviewer_id=$1
-    `, id)
+ 	SELECT p.id, p.title, p.author_id, p.status
+ 	FROM prs p
+ 	JOIN pr_reviewers prr ON p.id = prr.pr_id
+ 	WHERE prr.reviewer_id=$1
+ 	`, userID)
 	if err != nil {
-		writeErr(w, 500, err)
+		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
 	defer rows.Close()
-
-	var result []models.PR
-
+	type prShort struct {
+		PullRequestID   string `json:"pull_request_id"`
+		PullRequestName string `json:"pull_request_name"`
+		AuthorID        string `json:"author_id"`
+		Status          string `json:"status"`
+	}
+	prs := []prShort{}
 	for rows.Next() {
-		var p models.PR
-		var status string
-
-		if err := rows.Scan(&p.ID, &p.Title, &p.AuthorID, &p.TeamName, &status); err != nil {
-			writeErr(w, 500, err)
+		var id, title, author, status string
+		if err := rows.Scan(&id, &title, &author, &status); err != nil {
+			writeErr(w, 500, ErrCodeNotFound, err.Error())
 			return
 		}
-
-		p.Status = models.PRStatus(status)
-		result = append(result, p)
+		prs = append(prs, prShort{PullRequestID: id, PullRequestName: title,
+			AuthorID: author, Status: status})
 	}
-
-	json.NewEncoder(w).Encode(result)
+	resp := struct {
+		UserID       string    `json:"user_id"`
+		PullRequests []prShort `json:"pull_requests"`
+	}{UserID: userID, PullRequests: prs}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
