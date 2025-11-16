@@ -69,10 +69,10 @@ git clone github.com/Dedeqa/reviewer_service
 cd reviewer-service
 ```
 
-2. Запустить сервис через Docker Compose:
+2. Запустить сервис через Makefile или Docker-compose:
 
 ```bash
-docker-compose up --build
+make up / docker-compose up --build
 ```
 
 3. Сервис доступен на http://localhost:8080.
