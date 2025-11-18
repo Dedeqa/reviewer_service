@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"reviewer-service/internal/db"
 	"reviewer-service/internal/models"
@@ -57,7 +58,10 @@ LIMIT 1`, body.UserID).Scan(&teamName)
 		resp.Team = teamName.String
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	err2 := json.NewEncoder(w).Encode(resp)
+	if err2 != nil {
+		return
+	}
 }
 
 // listAssignedPRsHandler -> GET /users/getReview?user_id=...
@@ -77,14 +81,19 @@ func listAssignedPRsHandler(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Failed to rollback transaction: %v", err)
+		}
+	}(rows)
 	type prShort struct {
 		PullRequestID   string `json:"pull_request_id"`
 		PullRequestName string `json:"pull_request_name"`
 		AuthorID        string `json:"author_id"`
 		Status          string `json:"status"`
 	}
-	prs := []prShort{}
+	var prs []prShort
 	for rows.Next() {
 		var id, title, author, status string
 		if err := rows.Scan(&id, &title, &author, &status); err != nil {
@@ -99,5 +108,8 @@ func listAssignedPRsHandler(w http.ResponseWriter, r *http.Request) {
 		PullRequests []prShort `json:"pull_requests"`
 	}{UserID: userID, PullRequests: prs}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	err2 := json.NewEncoder(w).Encode(resp)
+	if err2 != nil {
+		return
+	}
 }

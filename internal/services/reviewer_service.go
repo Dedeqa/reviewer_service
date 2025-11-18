@@ -1,6 +1,8 @@
 package services
 
 import (
+	"database/sql"
+	"log"
 	"math/rand"
 	"time"
 
@@ -12,7 +14,12 @@ func PickRandomActiveFromTeamExcluding(team string, exclude []string) (string, e
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Failed to close rows: %v", err)
+		}
+	}(rows)
 
 	excludeMap := map[string]struct{}{}
 	for _, e := range exclude {

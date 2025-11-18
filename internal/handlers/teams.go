@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"reviewer-service/internal/db"
 
@@ -102,8 +103,13 @@ func getTeamWithMembers(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	defer rows.Close()
-	members := []teamMemberReq{}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("rollback error: %v", err)
+		}
+	}(rows)
+	var members []teamMemberReq
 	for rows.Next() {
 		var id, name string
 		var isActive bool
@@ -122,5 +128,8 @@ func getTeamWithMembers(w http.ResponseWriter, r *http.Request) {
 		Members:  members,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	err2 := json.NewEncoder(w).Encode(resp)
+	if err2 != nil {
+		return
+	}
 }

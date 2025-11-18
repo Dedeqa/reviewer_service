@@ -3,6 +3,8 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"reviewer-service/internal/db"
 	"reviewer-service/internal/services"
@@ -33,22 +35,22 @@ func createPR(w http.ResponseWriter, r *http.Request) {
 			"pull_request_id, pull_request_name and author_id required")
 		return
 	}
-	// check author exists
+
 	var a string
 	if err := db.DB.QueryRow(`SELECT id FROM users WHERE id=$1`,
 		body.AuthorID).Scan(&a); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			writeErr(w, 404, ErrCodeNotFound, "author not found")
 			return
 		}
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	// find author team (optional)
+
 	var teamName sql.NullString
 	_ = db.DB.QueryRow(`SELECT team_name FROM team_users WHERE user_id=$1
 LIMIT 1`, body.AuthorID).Scan(&teamName)
-	// try create PR; if exists -> PR_EXISTS
+
 	_, err := db.DB.Exec(`INSERT INTO prs(id,title,author_id,team_name)
 VALUES($1,$2,$3,$4)`, body.PullRequestID, body.PullRequestName,
 		body.AuthorID, teamName)
@@ -72,9 +74,12 @@ VALUES($1,$2,$3,$4)`, body.PullRequestID, body.PullRequestName,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(struct {
+	err2 := json.NewEncoder(w).Encode(struct {
 		PR interface{} `json:"pr"`
 	}{PR: pr})
+	if err2 != nil {
+		return
+	}
 }
 func mergePR(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -110,9 +115,12 @@ WHERE id=$1 AND status!='MERGED'`, body.PullRequestID)
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	json.NewEncoder(w).Encode(struct {
+	err2 := json.NewEncoder(w).Encode(struct {
 		PR interface{} `json:"pr"`
 	}{PR: pr})
+	if err2 != nil {
+		return
+	}
 }
 
 // reassignPR: { pull_request_id, old_reviewer_id }
@@ -167,7 +175,12 @@ pr_id=$1`, body.PullRequestID)
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Failed to close rows: %v", err)
+		}
+	}(rows)
 	var assigned []string
 	for rows.Next() {
 		var id string
@@ -191,7 +204,12 @@ pr_id=$1`, body.PullRequestID)
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	defer tx.Rollback()
+	defer func(tx *sql.Tx) {
+		err := tx.Rollback()
+		if err != nil {
+			log.Printf("Rollback error: %v", err)
+		}
+	}(tx)
 	_, err = tx.Exec(`DELETE FROM pr_reviewers WHERE pr_id=$1 AND
 reviewer_id=$2`, body.PullRequestID, body.OldReviewerID)
 	if err != nil {
@@ -213,10 +231,13 @@ VALUES($1,$2)`, body.PullRequestID, candidate)
 		writeErr(w, 500, ErrCodeNotFound, err.Error())
 		return
 	}
-	json.NewEncoder(w).Encode(struct {
+	err2 := json.NewEncoder(w).Encode(struct {
 		PR         interface{} `json:"pr"`
 		ReplacedBy string      `json:"replaced_by"`
 	}{PR: pr, ReplacedBy: candidate})
+	if err2 != nil {
+		return
+	}
 }
 
 // helper: load PR and form API shape
@@ -236,7 +257,12 @@ pr_id=$1 ORDER BY assigned_at`, id)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("Failed to rollback transaction: %v", err)
+		}
+	}(rows)
 	var reviewers []string
 	for rows.Next() {
 		var rid string

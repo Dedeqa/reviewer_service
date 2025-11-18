@@ -1,4 +1,4 @@
-.PHONY: build up down image run fmt test
+.PHONY: build up down image run fmt test lint lint-fix
 APP_NAME=server
 DOCKER_IMAGE=reviewer-service:local
 build:
@@ -9,9 +9,13 @@ up: image
 	docker-compose up --build
 down:
 	docker-compose down -v
-fmt:
-	gofmt -w .
 run: build
 	./bin/$(APP_NAME)
-test:
-	go test ./...
+fmt:
+	gofmt -w .
+logs:
+	docker-compose logs -f
+lint:
+	golangci-lint run
+lint-fix:
+	golangci-lint run --fix
