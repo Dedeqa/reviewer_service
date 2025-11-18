@@ -69,10 +69,24 @@ git clone github.com/Dedeqa/reviewer_service
 cd reviewer-service
 ```
 
-2. Запустить сервис через Makefile или Docker-compose:
+2. Запустить сервис через Docker Compose:
 
 ```bash
-make up / docker-compose up --build
+docker-compose up --build
 ```
 
 3. Сервис доступен на http://localhost:8080.
+
+## Примечание
+
+Проект использует стандартные настройки из compose-файла, но подготовлен к переходу на переменные окружения.
+Проект использует `golangci-lint` для проверки качества кода.
+Чтобы им воспользоваться, нужно установить `golangci-lint`: 
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+Запустить некоторые функции линтера можно следующим образом:
+```bash
+make lint # запустить линтинг
+make lint-fix  # исправить автоматически исправимые проблемы
+```
